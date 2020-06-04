@@ -1,0 +1,3 @@
+# device_model_group_template_folders: ['1_All_Juniper', '2_MPLS', '3_All_Juniper', '8_MX104_only', '17_All_MX_SRX', '18_All_MX_SRX']
+device_model_group_template_folders: ['1_All_Juniper', '2_MPLS', '3_All_Juniper', '17_All_MX_SRX', '18_All_MX_SRX']
+

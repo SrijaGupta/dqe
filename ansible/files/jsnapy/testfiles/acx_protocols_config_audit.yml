@@ -1,0 +1,6 @@
+tests_include:
+  - test_protocols_lldp
+
+test_protocols_lldp:
+  - command: show configuration protocols lldp | display set
+  # - command: show configuration protocols bgp

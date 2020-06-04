@@ -1,0 +1,92 @@
+---
+###################################################################################
+#
+# Copyright 2020 Juniper Networks, Inc. All rights reserved.
+# Licensed under the Juniper Networks Script Software License (the "License").
+# You may not use this script file except in compliance with the License, which is 
+# located at http://www.juniper.net/support/legal/scriptlicense/
+# Unless required by applicable law or otherwise agreed to in writing by the 
+# parties, software distributed under the License is distri buted on an 
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express 
+# or implied.
+#
+##################################################################################
+#
+# Author        : Subrata Mazumdar, Juniper Networks Professional Services
+# Contact       : subratam@juniper.net
+# Company       : Juniper Networks
+#
+#
+# Description   : Run this plabook to backup the NS-nodes based on the hostname(ip-address)
+#
+#                 How to run this playbook:
+#                   ansible-playbook -vvv netdev_junos_config_deploy_qfx.yml
+#
+#
+
+
+- name: generate Junos config file based config fraggment templates
+  hosts: all
+  gather_facts: false
+  connection: local
+  # serial: 1
+  # serial: "{{ ns_install_batch_size | default('100%') }}" # Must override from CLI - specifying in group_vars/all.yml does not work 
+  # vars_files:
+  #   - "{{ dqenet_device_config_file }}"
+  vars:
+    config_fragment_template_base_dir: "{{ lookup('env', 'CONFIG_FRAGMENT_TEMPLATE_BASE_DIR') | default(('%s/templates' | format(playbook_dir)), true) }}"
+    dev_cli_user_name: "{{ ansible_user | default(dqenet_device_junos_cli_username) }}"
+    ssh_key_list: "{{ lookup('file', dqenet_device_junos_cli_user_pubkey_file).split('\n') }}"
+    ansible_python_path: python3
+  roles:
+  - Juniper.junos
+
+
+  tasks:
+
+  - name: Display input parameters for this play 
+    # when: false
+    debug: 
+      msg: "device_group_name: {{ device_group_name }} device_model_group_template_folders: {{ device_model_group_template_folders | default([], true)  }} config_fragment_template_base_dir: {{ config_fragment_template_base_dir }} dqenet_device_junos_config_base_dir: {{ dqenet_device_junos_config_base_dir }} dqenet_device_junos_commit: {{ dqenet_device_junos_commit }} "
+  - name: Forced Fail
+    when: false
+    fail:
+
+  - name: terminate play if no template dir found for the device group 
+    when: (((device_model_group_template_folders | default([], true)) |  length) == 0)
+    meta: end_play
+
+
+  - include_role :
+      name : junos-config-generate
+    vars:
+      device_group_name: "{{ device_group_name }}"
+      config_fragment_template_dir_list: "{{ device_model_group_template_folders | default([], true)  }}"
+      junos_config_filename_prefix: "{{ dqenet_device_junos_config_filename_prefix }}"
+
+  - name: Forced Fail
+    when: false
+    fail:
+
+  - name: dump dqenet_device_junos_junos_config_params var
+    debug:
+      msg: "host : {{ inventory_hostname }} device_junos_config_file_local: {{ device_junos_config_file_local }} dqenet_device_junos_cli_username: {{ dqenet_device_junos_cli_username }} dqenet_device_junos_cli_password: {{ dqenet_device_junos_cli_password }}"
+
+  # Deploy device config file 
+  - include_role :
+      name : junos-config-deploy 
+    vars:
+      junos_config_filename_prefix: "{{ dqenet_device_junos_config_filename_prefix }}"
+      dev_cli_user_name: "{{ ansible_user | default(dqenet_device_junos_cli_username) }}"
+      dev_cli_user_password: "{{ ansible_password | default(dqenet_device_junos_cli_password) }}"
+      dev_cli_user_privkey_file: "{{ ansible_ssh_private_key_file | default(dqenet_device_junos_cli_user_privkey_file) }}"
+      # dev_config_commit_check: true
+      dev_config_commit: "{{ dqenet_device_junos_commit | default(false, true) }}"
+      # dev_config_commit_check: "{{ dqenet_device_junos_commit_check }}"
+      
+  # - name: Forced Fail
+  #   fail:
+
+# end-name
+
+

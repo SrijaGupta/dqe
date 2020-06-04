@@ -1,0 +1,103 @@
+---
+###################################################################################
+#
+# Copyright 2020 Juniper Networks, Inc. All rights reserved.
+# Licensed under the Juniper Networks Script Software License (the "License").
+# You may not use this script file except in compliance with the License, which is 
+# located at http://www.juniper.net/support/legal/scriptlicense/
+# Unless required by applicable law or otherwise agreed to in writing by the 
+# parties, software distributed under the License is distri buted on an 
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express 
+# or implied.
+#
+##################################################################################
+#
+# Author        : Subrata Mazumdar, Juniper Networks Professional Services
+# Contact       : subratam@juniper.net
+# Company       : Juniper Networks
+#
+#
+# Description   : 
+#
+#
+# tasks file for junos-config-deploy 
+
+- name: dump dqenet_device_junos_junos_config_params var
+  debug:
+    msg: "host : {{ inventory_hostname }} role_name: {{ role_name }} role_path: {{ role_path }} dev_config_commit: {{ dev_config_commit }}"
+    # msg: "host : {{ inventory_hostname }} dqenet_device_junos_junos_config_params: {{ dqenet_device_junos_junos_config_params }} "
+
+
+- name: Set path for device_junos_config local  dir
+  set_fact:
+    device_junos_config_dir_local : "{{ dqenet_device_junos_config_base_dir }}/{{ inventory_hostname }}"
+
+- name: Set path for device_junos_config_file_local files
+  set_fact:
+    device_junos_config_file_local : "{{ device_junos_config_dir_local }}/{{ junos_config_filename_prefix }}.conf"
+
+# Apply Junos Deice config 
+- name: dump the config file info
+  debug:
+    msg: "Uploading config based on params in file: {{device_junos_config_file_local }} to {{ inventory_hostname  }}"
+
+- name: Wait untill Junos Deice are reachable by SSH
+  wait_for:
+    port: 22
+    host: "{{ ansible_host }}"
+    # host: "{{ inventory_hostname }}"
+    delay: 1
+    sleep: 30
+    timeout: 60
+
+# - name: ping the hosts
+#   ping :
+
+- name: Wait untill Junos Deice are reachable by NETCONF
+  wait_for:
+    port: 830
+    # port: 22
+    host: "{{ ansible_host }}"
+    # host: "{{ inventory_hostname }}"
+    delay: 1
+    sleep: 30
+    timeout: 60
+
+
+# - name: Force Fail
+#   fail:
+
+- name: Deploy Junos config to device
+  juniper_junos_config:
+    config_mode: private # private|exclusive(default)
+    # load: "set"
+    # format: "set"
+    load: "merge"
+    # format: "text"
+    src: "{{ device_junos_config_file_local }}"
+    check: "{{ dev_config_commit_check | default(true, true) }}"
+    commit: "{{ dev_config_commit  | default(false, true) }}"
+    diff: true
+    # comment: "Configuring Junos Deice with Ansible"
+    # ignore_warning:
+    #   - "statement has no contents; ignored"
+    provider:
+      host: "{{ ansible_host }}"
+      username: "{{ dev_cli_user_name | default('root') }}"
+      # password: "{{ dev_cli_user_password }}"
+      ssh_keyfile: "{{ dev_cli_user_privkey_file }}" 
+    dest_dir: "{{ device_junos_config_dir_local }}" # for diff output 
+  register: junos_config_deploy_result
+  ignore_errors: true
+- name: Create error file if deployment failed
+  copy:
+    content: "{{ junos_config_deploy_result.msg }}"
+    dest: "{{ device_config_error_file_path }}"
+  vars:
+    device_config_error_file_path : "{{ device_junos_config_dir_local }}/{{ inventory_hostname }}.err"
+  when: (junos_config_deploy_result.failed)
+- name: Fail if the junos-config deploy task failed
+  fail:
+  when: (junos_config_deploy_result.failed)
+
+

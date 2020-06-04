@@ -1,0 +1,150 @@
+---
+###################################################################################
+#
+# Copyright 2020 Juniper Networks, Inc. All rights reserved.
+# Licensed under the Juniper Networks Script Software License (the "License").
+# You may not use this script file except in compliance with the License, which is
+# located at http://www.juniper.net/support/legal/scriptlicense/
+# Unless required by applicable law or otherwise agreed to in writing by the
+# parties, software distributed under the License is distri buted on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+# or implied.
+#
+##################################################################################
+#
+# Author        : Subrata Mazumdar, Juniper Networks Professional Services
+# Contact       : subratam@juniper.net
+# Company       : Juniper Networks
+#
+#
+# Description   : Initizlzes the authrozied_keys in NS nodes and known_hosts in the localhost.
+#                 Must be run before running any other playbook in order intizilaize the SSH keys in NS nodes.
+#
+#                 How to run this playbook:
+#                   ansible-playbook -vvv cluster_fabric_upload_authorized_keys.yml
+#
+#
+
+# - name: Build a temporary Inventory 
+#   hosts: localhost
+#   gather_facts: false
+#   vars:
+#     fabric_device_ip_list: "{{ lookup('env','NETDEV_DEVICE_IP_LIST') | default('10.93.19.33,10.93.19.26,10.93.19.25,10.93.19.248' true) }}"
+#   roles:
+#   - Juniper.junos
+#   tasks:
+# 
+#   - name: Create a temporary host group 
+#     add_host:
+#       name : "{{ dev_ip }}"
+#       groups: cluster_fabric_devices
+#       ansible_user: "{{ fabric_dev_cli_username }}"
+#       ansible_password: "{{ fabric_dev_cli_password }}"
+#       # ansible_ssh_private_key_file : "{{ nsnode_user_privkey_file }}"
+#       instance_name: "{{ dev_name }}"
+#     vars:
+#       dev_ip: "{{ item.1 }}"
+#       dev_name: "{{ 'device-%.2d' | format(item.0) }}"
+#     with_indexed_items: "{{ fabric_device_ip_list.split(',') }}"
+# # end-name
+    
+- name: Upload SSH keys to  Fabric Devices
+  hosts: "{{ device_group_name | default('cluster_fabric_devices', true) }}"
+  gather_facts: false
+  connection: local
+  # serial: 1
+  vars:
+    cli_user_auth_keys_file_path: "{{ lookup('env','NETDEV_DEVICE_CLI_USER_AUTH_KEYS_FILE_PATH') | default('~/.ssh/id_rsa.pub, true) }}"
+    ssh_key_list: "{{ lookup('file', cli_user_auth_keys_file_path).split('\n') }}"
+    cluster_device_commit_check: true
+    cluster_device_commit: true
+    update_ssh_known_hosts: "{{ (((lookup('env','NETDEV_JUNOS_DEVICE_UDATE_SSH_KNOWN_HOSTS') | default('', true)) | length) > 0)  }}"
+    ansible_python_interpreter: python3
+  roles:
+  - Juniper.junos
+
+  tasks:
+
+  - name: remove existing fabric device ip-addresses from known_hosts
+    lineinfile:
+      dest: "~/.ssh/known_hosts"
+      regexp: "^{{ ansible_host }} .*"
+      state: absent
+    when: update_ssh_known_hosts
+
+  - name: run ssh-keyscan to add keys for all fabric devices as a group
+    shell: 
+      cmd: "ssh-keyscan {{ ansible_host }}  >> ~/.ssh/known_hosts "
+    when: update_ssh_known_hosts
+    ignore_errors: yes
+
+  - name: run ssh-keyscan to add keys for all fabric devices indivdiually
+    shell: 
+      cmd: grep "{{ ansible_host }}"  ~/.ssh/known_hosts > /dev/null ||  ssh-keyscan {{ ansible_host }} >> ~/.ssh/known_hosts
+    when: update_ssh_known_hosts
+    ignore_errors: yes
+
+  - name: Wait untill QFXs are reachable by SSH
+    when: false
+    wait_for:
+      port: 22
+      host: "{{ ansible_host }}"
+      # host: "{{ inventory_hostname }}"
+      delay: 1
+      sleep: 30
+      timeout: 60
+
+  # - name: ping the hosts
+  #   ping :
+
+  - name: Wait untill QFXs are reachable by NETCONF
+    when: false
+    wait_for:
+      port: 830
+      # port: 22
+      host: "{{ ansible_host }}"
+      # host: "{{ inventory_hostname }}"
+      delay: 1
+      sleep: 30
+      timeout: 60
+
+  - name: generate junos config for authorzied keys
+    set_fact:
+      auth_key_lines : "{{ (auth_key_lines | default([], true)) + [ ('set system %s %s' | format(auth_user_id, ssh_key))] }}" 
+    vars: 
+      ssh_key: "{{ 'ssh-rsa \"%s\"' | format(item) }}"
+      auth_user_id: " {{ (fabric_dev_login_username == 'root') | ternary('root-authentication', ('login user %s authentication ' | format(fabric_dev_login_username))) }} "
+    with_items: "{{ ssh_key_list }}"
+
+  - name: Forced Fail
+    when: false
+    fail:
+
+  - name: Deploy device config
+    # when: false
+    juniper_junos_config:
+      load: "merge"
+      # format: "text"
+      # src: "{{ qfx_config_file_path }}"
+      lines: "{{ auth_key_lines }}"
+      check: "{{ cluster_device_commit_check }}"
+      commit: "{{ cluster_device_commit }}"
+      diff: false
+      # comment: "Configuring QFX with Ansible"
+      ignore_warning:
+        - "statement has no contents; ignored"
+      provider:
+        host: "{{ ansible_host }}"
+        username: "{{ fabric_dev_cli_username }}"
+        password: "{{ fabric_dev_cli_password }}"
+        # ssh_keyfile: "{{ fabric_dev_cli_user_privkey_file }}"
+      # savedir: /var/tmp
+    register: junos_config_deploy_result
+    ignore_errors: true
+
+  # - name: Forced Fail
+  #   fail:
+
+# end-name
+    
+

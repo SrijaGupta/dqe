@@ -1,0 +1,300 @@
+---
+###################################################################################
+#
+# Copyright 2020 Juniper Networks, Inc. All rights reserved.
+# Licensed under the Juniper Networks Script Software License (the "License").
+# You may not use this script file except in compliance with the License, which is 
+# located at http://www.juniper.net/support/legal/scriptlicense/
+# Unless required by applicable law or otherwise agreed to in writing by the 
+# parties, software distributed under the License is distri buted on an 
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express 
+# or implied.
+#
+##################################################################################
+#
+# Author        : Subrata Mazumdar, Juniper Networks Professional Services
+# Contact       : subratam@juniper.net
+# Company       : Juniper Networks
+#
+#
+# Description   : 
+#
+#
+# tasks file for junos-config-diff-report 
+
+
+- name : Build device name-ip list 
+  set_fact: 
+    device_name_ip_list: "{{ (device_name_ip_list | default([], true)) + [  {'name': hostname, 'ip' : host_ip} ] }}"
+  vars:
+    hostname: "{{ [item] |  map('extract', hostvars, 'inventory_hostname')  | first }}"
+    host_ip: "{{ [item] |  map('extract', hostvars, 'ansible_host')  | first }}"
+  with_items: "{{  groups[device_group_name] }}"
+
+# - name: test ip-list itertaion
+#   debug:
+#     msg: " pre: {{ item[0] }} post: {{ item[1] }}"
+#     # path: "{{ jsnapy_snapshot_dir_path }}"
+#   when : false and (item[0].name != item[1].name )
+#   with_nested:
+#     - "{{ device_name_ip_list }}"
+#     - "{{ device_name_ip_list }}"
+# 
+# - name: Forced Fail
+#   when: false
+#   fail:
+
+- name: Get the diff file meta-data 
+  stat:
+    path: "{{ host_config_diff_file }}"
+    # path: "{{ jsnapy_snapshot_dir_path }}"
+  vars:
+    host_ip: "{{ item.ip }}"
+    hostname: "{{ item.name }}"
+    host_config_dir: "{{ dqenet_device_junos_config_base_dir }}/{{ hostname }}"
+    host_config_diff_file: "{{ host_config_dir }}/{{ host_ip }}.diff"
+  register: diff_file_stat
+  with_items: "{{ device_name_ip_list }}"
+
+- name: Get the error file meta-data 
+  stat:
+    path: "{{ host_config_error_file }}"
+    # path: "{{ jsnapy_snapshot_dir_path }}"
+  vars:
+    host_ip: "{{ item.ip }}"
+    hostname: "{{ item.name }}"
+    host_config_dir: "{{ dqenet_device_junos_config_base_dir }}/{{ hostname }}"
+    host_config_error_file: "{{ host_config_dir }}/{{ hostname }}.err"
+  register: err_file_stat
+  with_items: "{{ device_name_ip_list }}"
+
+- name : Extract the diff file stats for hosts as list
+  set_fact: 
+    diff_file_stat_results: "{{ diff_file_stat.results }}"
+
+- name : Extract the error file stats for hosts as list
+  set_fact: 
+    err_file_stat_results: "{{ err_file_stat.results }}"
+
+#
+# The generation diff report follows following steps:
+# Input: 
+#   - diff file for each host (if generated in the commitcheck phase)
+#   - error file for each host (if generated in the commitcheck phase)
+#     An error file is generated if the commit-check task fails due to bad configuration.
+#   - Note: No diff/error file is generated if there are no changes in the config 
+#           Fiff and error file are identified by their device ip-address 
+#           and located in the junos-config directory.
+#
+# Output: A list of buckets for each unique diff and error files. 
+#         The buckts are as follow:
+#   - diff-report: 
+#     - bucket 0: contains the ip-address list of the all the hosts without 
+#                 any diff or error file.
+#     - bucket 1-n: List of ip-addresses of device that have same diff file  
+#     - bucket 9999: contains the ip-address list of the all the hosts 
+#                    wieth error file.
+#   - error-report: 
+#     - bucket 9998-(9999-m): Contains the ip-address of devices that have similar error file.
+# Setps:
+#   - Create a list of dict for each device with stat for diff and error files. Assign file size zero to 
+#     device with no diff file. 
+#     - Iteraate over all the dvice of the give device group,
+#       - assodiate the stat for diff file to the device. Assign file size zero to 
+#          device with no diff file or has error file. 
+#         - Assign bucket-indexx 0 to device with  error file.
+#       - associate the stat for error file for the device (if any).
+#         - Assign bucket-indexx 9999 to device with  error file.
+#       - append the device dict to the device record list
+#     - Iteraate over all the device records, compare the diff file of teh hosts and
+#       then assign a unique buckt-index for each device for devices with similar diff file.
+#     - Iteraate over all the device records with bucket-index 9999, compare the error file of teh hosts and
+#       then assign a unique buckt-index for each device for devices with similar error file.
+#
+- name : Build the diff/error report by collating the stats of diff and error files for each devices
+  set_fact: 
+    err_diff_report_data: "{{ err_diff_report_data_str | from_json }}"
+  vars:
+    err_diff_report_data_str: >-
+      {% set report_ns  = namespace({
+           'device_err_diff_data_list' : [],
+           'device_bucket_diff_data_list' : [],
+           'device_bucket_err_data_list' : [],
+           })                                                       %}
+
+      {% set error_bucket_start_idx = 9999                          %} 
+      {% set err_diff_report_data = {}                              %}
+      {% for device in device_name_ip_list                          %}
+      {%   set host_ip = device.ip                                  %}
+      {%   set hostname = device.name                               %}
+      {%   set diff_file_stat = diff_file_stat_results 
+             | selectattr('item.name', 'equalto', hostname) 
+             | first                                                %}
+      {%   set dev_diff_data = device | to_json | from_json         %}
+      {%   if not(diff_file_stat.stat.exists)                       %}
+      {%     set xxx = diff_file_stat.stat.update({'size': 0})      %}
+      {%   endif                                                    %}
+      {%   set xxx = dev_diff_data.update({'stat' : diff_file_stat.stat })%}
+      {%   set xxx = dev_diff_data.update({'bucket_idx' : 0 })      %}
+      {%   set xxx = dev_diff_data.update({'diff_cmd_result' : [] }) %}
+      {%   set xxx = dev_diff_data.update({'bucket_diff_file_path' : '' }) %}
+      {%   set err_file_stat = err_file_stat_results 
+             | selectattr('item.name', 'equalto', hostname) 
+             | first                                                %}
+      {%   if (err_file_stat.stat.exists)                           %}
+      {%     set xxx = dev_diff_data.update({'bucket_idx' : error_bucket_start_idx }) %}
+      {%     set xxx = diff_file_stat.stat.update({'size': 0})      %}
+      {%     set xxx = dev_diff_data.update({'err_stat' : err_file_stat.stat })%}
+      {%     set xxx = dev_diff_data.update({'bucket_err_file_path' : '' }) %}
+      {%   endif                                                    %}
+      {%   set xxx = report_ns.device_err_diff_data_list.append(dev_diff_data)  %}
+      {% endfor                                                     %}
+      {% set nonzero_device_diff_data_list = report_ns.device_err_diff_data_list 
+             | selectattr('stat.exists', 'equalto', true) 
+             | rejectattr('stat.size', 'equalto', 0) | list         %}
+      {% for dev_diff_data_1 in nonzero_device_diff_data_list       %}
+      {%   set row_index = loop.index                               %}
+      {%   if (dev_diff_data_1.bucket_idx == 0)                     %}
+      {%     set xxx = dev_diff_data_1.update({'bucket_idx' : row_index })       %}
+      {%     set xxx = dev_diff_data_1.update({'bucket_diff_file_path' : dev_diff_data_1.stat.path })       %}
+      {%   endif                                                    %}
+      {%   set row_bucket_idx = dev_diff_data_1.bucket_idx          %}
+      {%   for dev_diff_data_2 in nonzero_device_diff_data_list     %}
+      {%     set col_index = loop.index                             %}
+      {%     if (col_index > row_index)                             %}
+      {%       if (dev_diff_data_1.stat.size == dev_diff_data_2.stat.size) %}
+      {%         set diff_cmd = 'diff -b -B %s %s' | format(dev_diff_data_1.stat.path, dev_diff_data_2.stat.path) %}
+      {%         set diff_result = diff_cmd                         %}
+      {%         set diff_result = lookup('pipe', diff_cmd)         %}
+      {%         if (diff_result == "")                             %}
+      {%           set xxx = dev_diff_data_2.update({'bucket_idx' : row_bucket_idx })       %}
+      {%           set bucket_diff_file_path = dev_diff_data_1.bucket_diff_file_path          %}
+      {%           set xxx = dev_diff_data_2.update({'bucket_diff_file_path' : bucket_diff_file_path })       %}
+      {%         endif                                              %}
+      {%       endif                                                %}
+      {%     endif                                                  %}
+      {%   endfor                                                   %}
+      {% endfor                                                     %}
+      {% set bucket_idx_list = report_ns.device_err_diff_data_list | map(attribute='bucket_idx') | unique | list      %}
+      {% for bucket_idx in bucket_idx_list                          %}
+      {%   set device_bucket_diff_data = {}                         %}
+      {%   set device_diff_data_list = report_ns.device_err_diff_data_list | selectattr('bucket_idx', 'equalto', bucket_idx) | list %}
+      {%   set host_ip_list = device_diff_data_list | map(attribute='ip') | list %} 
+      {%   set hostname_list = device_diff_data_list | map(attribute='name') | list %} 
+      {%   set bucket_diff_file_path = device_diff_data_list[0].bucket_diff_file_path | default('', true) %}
+      {%   set bucket_diff_data = ''                                %}
+      {%   if (bucket_diff_file_path != '')                         %} 
+      {%     set bucket_diff_data = lookup('file', bucket_diff_file_path) %}
+      {%   endif                                                    %}
+      {%   set host_ip_list_str = host_ip_list | join( ',')         %}
+      {%   set hostname_list_str = hostname_list | join( ',')       %}
+      {%   set device_bucket_diff_data = {
+               "bucket_idx" : bucket_idx,
+               "host_ip_list" : host_ip_list_str,
+               "hostname_list" : hostname_list_str,
+               "diff_file_path" : bucket_diff_file_path,
+               "diff_data" : bucket_diff_data,
+               }                                                    %}
+      {%   if (bucket_idx == error_bucket_start_idx)                                  %}
+      {%     set xxx = device_bucket_diff_data.update({'msg': 'See error report below.'}) %}
+      {%     set xxx = device_bucket_diff_data.update({'error_bucket': true}) %}
+      {%     set xxx = device_bucket_diff_data.update({'error_host_ip_list': host_ip_list_str}) %}
+      {%     set xxx = device_bucket_diff_data.update({'error_hostname_list': hostname_list_str}) %}
+      {%     set xxx = device_bucket_diff_data.pop('host_ip_list')  %}
+      {%     set xxx = device_bucket_diff_data.pop('hostname_list')  %}
+      {%     set xxx = device_bucket_diff_data.pop('diff_file_path')  %}
+      {%     set xxx = device_bucket_diff_data.pop('diff_data')  %}
+      {%   endif                                                    %}
+      {%   set xxx = report_ns.device_bucket_diff_data_list.append(device_bucket_diff_data) %}
+      {% endfor                                                     %}
+      {% set err_bucket_idx_list = []                               %}
+      {% set device_err_data_list = report_ns.device_err_diff_data_list 
+             | selectattr('bucket_idx', 'equalto', error_bucket_start_idx) 
+             | selectattr('err_stat.exists', 'equalto', true) 
+             | list                                                 %}
+      {% for dev_err_data_1 in device_err_data_list                 %}
+      {%   set row_index = loop.index                               %}
+      {%   if (dev_err_data_1.bucket_idx == error_bucket_start_idx)                   %}
+      {%     set xxx = dev_err_data_1.update({'bucket_idx' : (error_bucket_start_idx - row_index) })       %}
+      {%     set xxx = dev_err_data_1.update({'bucket_err_file_path' : dev_err_data_1.err_stat.path })       %}
+      {%   endif                                                    %}
+      {%   set row_bucket_idx = dev_err_data_1.bucket_idx           %}
+      {%   for dev_err_data_2 in device_err_data_list               %}
+      {%     set col_index = loop.index                             %}
+      {%     if (col_index > row_index)                             %}
+      {%       if (dev_err_data_1.err_stat.size == dev_err_data_2.err_stat.size) %}
+      {%         set diff_cmd = 'diff -b -B %s %s' | format(dev_err_data_1.err_stat.path, dev_err_data_2.err_stat.path) %}
+      {%         set err_result = lookup('pipe', diff_cmd)         %}
+      {%         if (err_result == "")                             %}
+      {%           set xxx = dev_err_data_2.update({'bucket_idx' : row_bucket_idx })       %}
+      {%           set bucket_err_file_path = dev_err_data_1.bucket_err_file_path          %}
+      {%           set xxx = dev_err_data_2.update({'bucket_err_file_path' : bucket_err_file_path })       %}
+      {%         endif                                              %}
+      {%       endif                                                %}
+      {%     endif                                                  %}
+      {%   endfor                                                   %}
+      {% endfor                                                     %}
+      {% set err_bucket_idx_list = report_ns.device_err_diff_data_list | selectattr('err_stat', 'defined') | map(attribute='bucket_idx') | unique | list      %}
+      {% for bucket_idx in err_bucket_idx_list                      %}
+      {%   set device_bucket_err_data = { }                         %}
+      {%   set device_err_data_list = report_ns.device_err_diff_data_list | selectattr('bucket_idx', 'equalto', bucket_idx) | list %}
+      {%   set host_ip_list = device_err_data_list | map(attribute='ip') | list %} 
+      {%   set hostname_list = device_err_data_list | map(attribute='name') | list %} 
+      {%   set bucket_err_file_path = device_err_data_list[0].bucket_err_file_path | default('', true) %}
+      {%   set bucket_err_data = ''                                %}
+      {%   if (bucket_err_file_path != '')                         %} 
+      {%     set bucket_err_data = lookup('file', bucket_err_file_path) %}
+      {%   endif                                                    %}
+      {%   set host_ip_list_str = host_ip_list | join( ',')          %}
+      {%   set hostname_list_str = hostname_list | join( ',')        %}
+      {%   set device_bucket_err_data = {
+               "bucket_idx" : bucket_idx,
+               "host_ip_list" : host_ip_list_str,
+               "hostname_list" : hostname_list_str,
+               "err_file_path" : bucket_err_file_path,
+               "err_data" : bucket_err_data,
+               }                                                    %}
+      {%   set xxx = report_ns.device_bucket_err_data_list.append(device_bucket_err_data) %}
+      {% endfor                                                     %}
+      {% set xxx = err_diff_report_data.update({
+                 "device_config_diff_report" : report_ns.device_bucket_diff_data_list,
+                 "device_config_error_report" : report_ns.device_bucket_err_data_list
+               })                                                    %}
+      {{ err_diff_report_data | to_json }}
+
+# - name: Forced Fail
+#   when: false
+#   fail:
+
+- name: Set path for device config diff report  dir
+  set_fact:
+    device_group_junos_config_diff_dir : "{{ dqenet_device_junos_config_diff_dir }}/{{ device_group_name }}"
+- name: create directory for device config diff report 
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: 0755
+  with_items:
+    - "{{ device_group_junos_config_diff_dir }}"
+    # - "{{ dqnet_device_data_dir }}/junos_config_err }}"
+
+- name: Set name for device config diff report file 
+  set_fact:
+    device_group_diff_report_file_name : "{{'%s_config_diff_report.yml' | format(device_group_name)  }}"
+    # device_group_diff_report_file_name : "{{'%s_config_diff_%s.yml' | format(device_group_name, curr_date_time)  }}"
+  # vars:
+  #   date_args: "'+%Y%m%d%H%M'"
+  #   curr_date_time: "{{ lookup('pipe', 'date ' + date_args) }}"
+- name: Save junos-config diff report for device group {{ device_group_name}} 
+  copy: 
+    content: "{{ err_diff_report_data | to_nice_yaml }}"
+    # content: "{{ err_diff_report_data.device_config_diff_data | to_nice_yaml }}"
+    dest: "{{ device_group_diff_report_file_path }}"
+    mode: '0644'
+  vars: 
+    device_group_diff_report_file_path: "{{ device_group_junos_config_diff_dir }}/{{ device_group_diff_report_file_name }}"
+
+# - name: Forced Fail
+#   when: false
+#   fail:
+# 

@@ -1,0 +1,52 @@
+pipeline {
+    agent {
+        label 'lab'
+    }
+    options {
+        skipDefaultCheckout true
+    }
+    environment {
+        ANSIBLE_BASE="./ansible"
+        BASE_CONFIG="./base_config"
+        CONFIG_FRAGMENT_TEMPLATE_REPO_DIR="${WORKSPACE}/${BASE_CONFIG}"
+        CONFIG_FRAGMENT_TEMPLATE_BASE_DIR="${CONFIG_FRAGMENT_TEMPLATE_REPO_DIR}/templates"
+        INVENTORY_FILE_PATH="${WORKSPACE}/${ANSIBLE_BASE}/ansible/inventory/ccc_inventory.py"
+        ANSIBLE_HOST_KEY_CHECKING="False"
+        JSNAPY_TESTFILE_DIR="${WORKSPACE}/jsnapy/testfiles"
+    }
+    stages {
+        stage('Pre-Snapshot'){
+            steps{
+                sh 'echo Taking Pre-Snapshot...'
+                sleep 1
+                sh 'echo Pre-Snapshot taken!'
+            }
+        }
+        stage('Maintenance'){
+            steps{
+                input message: 'Continue?', ok: 'Continue'
+            }
+        }
+        stage('Post-Snapshot'){
+            steps{
+                sh 'echo Taking Post-Snapshot...'
+                sleep 1
+                sh 'echo Post-Snapshot taken!'
+            }
+        }
+        stage('Compare'){
+            steps{
+                sh 'echo Comparing pre/post Snapshots...'
+                sleep 1
+                sh 'echo Done!'
+            }
+        }
+        stage('Report Generation'){
+            steps{
+                sh 'echo Generating report'
+                sleep 1
+                sh 'echo Report generated!'
+            }
+        }
+    }
+}

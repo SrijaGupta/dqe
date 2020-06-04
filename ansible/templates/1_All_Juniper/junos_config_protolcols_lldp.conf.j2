@@ -1,0 +1,53 @@
+{#
+###################################################################################
+#
+# Copyright 2020 Juniper Networks, Inc. All rights reserved.
+# Licensed under the Juniper Networks Script Software License (the "License").
+# You may not use this script file except in compliance with the License, which is 
+# located at http://www.juniper.net/support/legal/scriptlicense/
+# Unless required by applicable law or otherwise agreed to in writing by the 
+# parties, software distributed under the License is distri buted on an 
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express 
+# or implied.
+#
+##################################################################################
+#
+# Author        : Subrata Mazumdar, Juniper Networks Professional Services
+# Contact       : subratam@juniper.net
+# Company       : Juniper Networks
+#
+#
+# Description   : 
+#                 
+##################################################################################
+#}
+
+
+{% if not(inventory_hostname in  ['vmx107'])        %}
+
+protocols {
+{% if (inventory_hostname in  ['vmx102', 'vmx106'])        %}
+    lldp {
+        interface all;
+    }
+{% elif (inventory_hostname in  ['vmx103'])     %}
+{% else                                         %}
+    lldpx {
+        interface all;
+    }
+{% endif                                        %}
+
+{% if (inventory_hostname in  ['vmx104'])        %}
+    lldpx-medx {
+        interface all;
+    }
+{% elif (inventory_hostname in  ['vmx105'])     %}
+{% else                                         %}
+    lldp-medx {
+        interface all;
+    }
+{% endif                                        %}
+}
+
+{% endif                                        %}
+

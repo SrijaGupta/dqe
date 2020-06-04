@@ -1,0 +1,10 @@
+device_model_group_template_folders: [
+            "1_All_Juniper",
+            "2_MPLS",
+            "5_All_ACX",
+            "15_All_ACX_SRX",
+            "16_All_ACX_MX_except_MX104",
+            "17_All_MX_SRX"
+        ]
+
+

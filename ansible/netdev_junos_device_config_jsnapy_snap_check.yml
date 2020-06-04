@@ -1,0 +1,143 @@
+---
+###################################################################################
+#
+# Copyright 2020 Juniper Networks, Inc. All rights reserved.
+# Licensed under the Juniper Networks Script Software License (the "License").
+# You may not use this script file except in compliance with the License, which is 
+# located at http://www.juniper.net/support/legal/scriptlicense/
+# Unless required by applicable law or otherwise agreed to in writing by the 
+# parties, software distributed under the License is distri buted on an 
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express 
+# or implied.
+#
+##################################################################################
+#
+# Author        : Subrata Mazumdar, Juniper Networks Professional Services
+# Contact       : subratam@juniper.net
+# Company       : Juniper Networks
+#
+#
+# Description   : 
+#
+#
+
+- name: Use jsnapy to take Pre and Post snapshots and do snapchek between Pre and Post snapshots
+  hosts: "{{ target_device_group | default('cluster_fabric_mx_devices', true) }}"
+  # hosts: localhost
+  connection: local
+  become: false
+  gather_facts: false
+  # serial: 1
+  # serial: "{{ ns_install_batch_size | default('100%') }}" # Must override from CLI - specifying in group_vars/all.yml does not work
+  roles:
+  - Juniper.junos
+  #
+  vars :
+    # jsnapy_home_dir: "{{ playbook_dir }}/files/jsnapy" 
+    jsnapy_config_file_dir_path: "{{ jsnapy_home_dir }}"
+    jsnapy_test_file_dir_path: "{{ jsnapy_config_file_dir_path }}/testfiles"
+    jsnapy_base_dir_path: "/var/tmp/jsnapy"
+    jsnapy_snapshot_dir_path: "{{ jsnapy_base_dir_path }}/snapshots"
+    jsnapy_log_dir_path: "{{ jsnapy_base_dir_path }}/logs"
+    jsnapy_config_j2_file_path: jsnapy.cfg.j2
+
+  environment:
+      JSNAPY_HOME: "{{ jsnapy_home_dir }}" 
+
+  tasks:
+
+  # Junos config file specieis the directort path for config_file_path, snapshot_path, and test_file_path
+  # and places the config file under JSNAPY_HOME dir
+  # Twstfile path 
+  - name:  Generate JSNAPy configuration file under JSNAPy home directory 
+    template:
+      src: "{{ jsnapy_config_j2_file_path }}"
+      dest: "{{ jsnapy_home_dir }}/jsnapy.cfg"
+
+  - name: initialize JSNAPy log directory - remove and create 
+    file:
+      path: "{{ jsnapy_log_dir_path }}"
+      state: "{{ item }}"
+      mode: 0755
+    when: (jsnapy_log_dir_path is defined) and (jsnapy_log_dir_path != "")
+    with_items:
+      # - absent 
+      - directory 
+
+  - name: initialize JSNAPy snapshots directory - remove and create 
+    when: false
+    file:
+      path: "{{ jsnapy_snapshot_dir_path }}"
+      state: "{{ item }}"
+      mode: 0755
+    when: (jsnapy_log_dir_path is defined) and (jsnapy_log_dir_path != "")
+    with_items:
+      # - absent 
+      - directory 
+
+  # - name : Forced Fail
+  #   fail:
+
+  - name: Collect Pre Snapshot
+    juniper_junos_jsnapy:
+    # junos_jsnapy:
+      host: "{{ ansible_host }}"
+      # host: "{{ inventory_hostname }}"
+      # host: "{{ item }}"
+      user: "{{ juniper_user | default('root', true) }}"
+      passwd: "{{ juniper_password | default('Embe1mpls', true)}}" 
+      ssh_keyfile: "{{ juniper_key }}" 
+      action: "snap_pre"
+      dir: "{{ jsnapy_test_file_dir_path }}"
+      logdir: "{{ jsnapy_log_dir_path }}"
+      # config_file: "{{ jsnapy_config_audit_conf_file  }}"
+      test_files: "{{ jsnapy_config_audit_test_file  }}"
+
+  - name : Forced Fail
+    when: false
+    fail:
+
+  - name: Collect Post Snapshot
+    juniper_junos_jsnapy:
+      host: "{{ ansible_host }}"
+      # host: "{{ inventory_hostname }}"
+      user: "{{ juniper_user | default('root', true) }}"
+      passwd: "{{ juniper_password | default('Embe1mpls', true)}}" 
+      ssh_keyfile: "{{ juniper_key }}" 
+      action: "snap_post"
+      dir: "{{ jsnapy_test_file_dir_path }}"
+      logdir: "{{ jsnapy_log_dir_path }}"
+      # config_file: "{{ jsnapy_config_audit_conf_file  }}"
+      test_files: "{{ jsnapy_config_audit_test_file }}"
+
+  - name: Compare snapshots
+    juniper_junos_jsnapy:
+      host: "{{ ansible_host }}"
+      # host: "{{ inventory_hostname }}"
+      user: "{{ juniper_user | default('root', true) }}"
+      passwd: "{{ juniper_password | default('Embe1mpls', true)}}" 
+      ssh_keyfile: "{{ juniper_key }}" 
+      action: "check"
+      dir: "{{ jsnapy_test_file_dir_path }}"
+      logdir: "{{ jsnapy_log_dir_path }}"
+      # config_file: "{{ jsnapy_config_audit_conf_file  }}"
+      test_files: "{{ jsnapy_config_audit_test_file }}"
+    register: test_check
+
+  - name: Debug jsnapy
+    debug: 
+      msg: "{{ test_check }}"
+
+  - name: Check JSNAPy tests results
+    assert:
+      that:
+      - "test_check.passPercentage == 100"
+      msg: "jsnapy test on {{ inventory_hostname }} failed"
+
+  - name: Print the full test response
+    debug: 
+      var: test_check
+
+
+
+

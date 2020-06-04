@@ -1,0 +1,23 @@
+system {
+    syslog {
+        host log {
+            kernel info;
+            any notice;
+            pfe info;
+            interactive-commands any;
+        }
+        file messages {
+            kernel info;
+            any notice;
+            authorization info;
+            pfe info;
+            archive world-readable;
+        }
+        file security {
+            interactive-commands any;
+            archive world-readable;
+        }
+    }
+}
+
+

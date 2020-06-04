@@ -1,0 +1,165 @@
+---
+###################################################################################
+#
+# Copyright 2020 Juniper Networks, Inc. All rights reserved.
+# Licensed under the Juniper Networks Script Software License (the "License").
+# You may not use this script file except in compliance with the License, which is 
+# located at http://www.juniper.net/support/legal/scriptlicense/
+# Unless required by applicable law or otherwise agreed to in writing by the 
+# parties, software distributed under the License is distri buted on an 
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express 
+# or implied.
+#
+##################################################################################
+#
+# Author        : Subrata Mazumdar, Juniper Networks Professional Services
+# Contact       : subratam@juniper.net
+# Company       : Juniper Networks
+#
+#
+# Description   : 
+#
+#
+# tasks file for junos-config-generate 
+
+- name: dump role vars
+  debug:
+    msg: "host : {{ inventory_hostname }} role_name: {{ role_name }} role_path: {{ role_path }} device_group_name: {{ device_group_name }} dqenet_device_junos_config_base_dir: {{ dqenet_device_junos_config_base_dir }} "
+    # msg: "host : {{ inventory_hostname }} dqenet_device_junos_junos_config_params: {{ dqenet_device_junos_junos_config_params }} "
+
+- name: dump config_fragment_template_dir_list var
+  debug:
+    msg: "config_fragment_template_dir_list : {{ config_fragment_template_dir_list }}"
+
+# - name: Force Fail
+#   when: true
+#   fail:
+
+# - name: Forced Fail if no template dirs specified for the device group 
+#   when: ((config_fragment_template_dir_list | length) == 0)
+#   meta: end_play
+
+- name: Find all template files for this role based on the related template fragment dir-list 
+  find:
+    paths: "{{ config_fragment_template_base_dir}}/{{ item }}"
+    patterns: '*.j2'
+  with_items: "{{ config_fragment_template_dir_list }}"
+  vars:
+    config_fragment_template_base_dir: "{{ lookup('env', 'CONFIG_FRAGMENT_TEMPLATE_BASE_DIR') | default(('%s/templates' | format(playbook_dir)), true) }}"
+  register: find_templates_fragment_result
+  # delegate_to: localhost
+  
+# - name: Dump the result of find for for config fragments templates for roles
+#   when: false
+#   set_fact:
+#     find_templates_fragment_result_x : "{{ find_templates_fragment_result.results }}"
+# 
+# - name: Dump the files data related to find for config fragments templates for roles 
+#   when: false
+#   set_fact:
+#     find_templates_fragment_result_files : "{{ find_templates_fragment_result.results |  map(attribute='files') | sum(start=[]) }}"
+# 
+- name: Set role specific template file path list  fact 
+  set_fact:
+    config_fragment_template_path_list : "{{ find_templates_fragment_result.results | map(attribute='files') | sum(start=[])  | map(attribute='path') | list }}"
+
+
+- name: Set path for device junos_config local  dir
+  set_fact:
+    device_junos_config_dir_local : "{{ dqenet_device_junos_config_base_dir }}/{{ host_dir_name }}"
+  vars:
+    host_dir_name: "{{ (gen_base_config | default(false, true)) | ternary(device_group_name, inventory_hostname) }}"
+
+- name: Set path for device_junos_config fragments local  dir
+  set_fact:
+    device_junos_config_fragments_dir_local : "{{ device_junos_config_dir_local }}/fragments"
+
+- name: delete config fragemnt directory 
+  file:
+    path: "{{ item }}"
+    state: absent
+    mode: 0755
+  with_items:
+    - "{{ device_junos_config_dir_local }}"
+  when: clear_role_config_fragment_dir
+
+- name: create directory for config fragemnts dir hierarchy 
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: 0755
+  with_items:
+    - "{{ dqenet_device_junos_config_base_dir }}"
+    - "{{ device_junos_config_dir_local }}"
+    # - "{{ device_junos_config_dir_local }}/{{device_group_name}}"
+    - "{{ device_junos_config_fragments_dir_local }}"
+  # delegate_to: localhost
+
+- name: create directory for base config for device group 
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: 0755
+  when: not(gen_base_config | default(false, true)) 
+  run_once: true
+  with_items:
+    - "{{ dqenet_device_junos_config_base_dir }}/{{ device_group_name }}"
+
+# - name: Force Fail
+#   when: false
+#   fail:
+
+- name: Generate device config fragments based on the template files
+  template:
+    src: "{{ item }}"
+    dest : "{{ device_junos_config_fragments_dir_local }}/{{ config_fragment_template_filename_prefix }}.conf"
+  register: device_junos_config_gen_result
+  vars: 
+    config_fragment_template_file_name: "{{ item | basename}}"
+    config_fragment_template_filename_prefix: "{{ config_fragment_template_file_name.split('.')[0] }}"
+    # ssh_key_list: "{{ lookup('file', dqenet_device_junos_cli_user_pubkey_file).split('\n') }}"
+  with_items: "{{ config_fragment_template_path_list }}"
+
+
+- name: Force Fail
+  when: false
+  fail:
+
+- name: Set device_junos_config_fragment_file_list fact 
+  set_fact:
+    device_junos_config_fragment_file_list : "{{ device_junos_config_gen_result.results | map(attribute='dest') | list }}"
+- name: dump device_junos_config_fragment_file_list var
+  when: false
+  debug:
+    msg: "host : {{ inventory_hostname }} device_junos_config_fragment_file_list: {{ device_junos_config_fragment_file_list }}"
+
+- name: Set path for device_junos_config_file_local files
+  set_fact:
+    device_junos_config_file_local : "{{ device_junos_config_dir_local }}/{{ junos_config_filename_prefix }}.conf"
+
+- name: Assemble final config file from files in config fragments directory
+  assemble:
+    src: "{{ device_junos_config_fragments_dir_local }}"
+    dest: "{{ device_junos_config_file_local }}"
+    regexp: ".[.]*.conf$"
+    backup: yes
+  # delegate_to: localhost
+
+- name: copy the device config to base config directory 
+  shell:
+    cmd: "cp {{ src }} {{ dest }}"
+  when: not(gen_base_config | default(false, true)) 
+  vars:
+    src: "{{ device_junos_config_file_local  }}"
+    dest: "{{ dqenet_device_junos_config_base_dir }}/{{ device_group_name }}"
+  run_once: true
+
+
+- name: dump the config file name
+  debug:
+    msg: "device_junos_config_file_local: {{device_junos_config_file_local }} junos_device_group_base_config_dir: {{ dqenet_device_junos_config_base_dir }}/{{ device_group_name }}"
+
+# - name: Force Fail
+#   when: false
+#   fail:
+

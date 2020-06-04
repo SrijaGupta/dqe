@@ -1,0 +1,70 @@
+---
+###################################################################################
+#
+# Copyright 2020 Juniper Networks, Inc. All rights reserved.
+# Licensed under the Juniper Networks Script Software License (the "License").
+# You may not use this script file except in compliance with the License, which is 
+# located at http://www.juniper.net/support/legal/scriptlicense/
+# Unless required by applicable law or otherwise agreed to in writing by the 
+# parties, software distributed under the License is distri buted on an 
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express 
+# or implied.
+#
+##################################################################################
+#
+# Author        : Subrata Mazumdar, Juniper Networks Professional Services
+# Contact       : subratam@juniper.net
+# Company       : Juniper Networks
+#
+#
+# Description   : Run this plabook to backup the NS-nodes based on the hostname(ip-address)
+#
+#                 How to run this playbook:
+#                   ansible-playbook -vvv netdev_junos_config_deploy_qfx.yml
+#
+#
+
+
+- name: generate Junos config file based config fraggment templates
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  vars:
+    config_fragment_template_base_dir: "{{ lookup('env', 'CONFIG_FRAGMENT_TEMPLATE_BASE_DIR') | default(('%s/templates' | format(playbook_dir)), true) }}"
+    dqenet_device_junos_config_base_dir: "{{ dqnet_device_data_dir }}/junos_config_base"
+    device_model_group_template_folders: "{{ groups[device_group_name] |  map('extract', hostvars, 'device_model_group_template_folders')  | first }}"
+    # device_ip_any: "{{ groups[device_group_name] |  map('extract', hostvars, 'ansible_host')  | first }}"
+    ssh_key_list: "{{ lookup('file', dqenet_device_junos_cli_user_pubkey_file).split('\n') }}"
+  roles:
+  - Juniper.junos
+
+
+  tasks:
+
+  - name: Display input parameters for this play 
+    # when: false
+    debug: 
+      msg: "device_group_name: {{ device_group_name }} device_model_group_template_folders: {{ device_model_group_template_folders | default([], true)  }} config_fragment_template_base_dir: {{ config_fragment_template_base_dir }} dqenet_device_junos_config_base_dir: {{ dqenet_device_junos_config_base_dir }} dqenet_device_junos_commit: {{ dqenet_device_junos_commit }} "
+  - name: Forced Fail
+    when: false
+    fail:
+
+  - name: terminate play if no template dir found for the device group 
+    when: (((device_model_group_template_folders | default([], true)) |  length) == 0)
+    meta: end_play
+
+  - include_role :
+      name : junos-config-generate
+    vars:
+      # device_group_name: "{{ device_group_name }}"
+      # dqenet_device_junos_config_base_dir: "{{ dqnet_device_data_dir }}/junos_config_base"
+      config_fragment_template_dir_list: "{{ device_model_group_template_folders | default([], true)  }}"
+      junos_config_filename_prefix: "{{ dqenet_device_junos_config_filename_prefix }}"
+      gen_base_config: true
+
+  # - name: Forced Fail
+  #   fail:
+
+# end-name
+
+

@@ -1,0 +1,16 @@
+pika
+Jinja2
+netaddr
+jmespath
+jxmlease
+selenium
+future
+kombu
+amqp
+shade
+python-openstackclient
+python-heatclient
+setuptools
+bson
+jsnapy
+openpyxl

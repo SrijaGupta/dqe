@@ -1,0 +1,185 @@
+---
+###################################################################################
+#
+# Copyright 2020 Juniper Networks, Inc. All rights reserved.
+# Licensed under the Juniper Networks Script Software License (the "License").
+# You may not use this script file except in compliance with the License, which is 
+# located at http://www.juniper.net/support/legal/scriptlicense/
+# Unless required by applicable law or otherwise agreed to in writing by the 
+# parties, software distributed under the License is distri buted on an 
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express 
+# or implied.
+#
+##################################################################################
+#
+# Author        : Subrata Mazumdar, Juniper Networks Professional Services
+# Contact       : subratam@juniper.net
+# Company       : Juniper Networks
+#
+#
+# Description   : Run this plabook to backup the NS-nodes based on the hostname(ip-address)
+#
+#                 How to run this playbook:
+#                   ansible-playbook -vvv netdev_junos_config_deploy_qfx.yml
+#
+#
+
+
+- name: Extract device Model Group Template Mapping Spreadsheet
+  hosts: localhost
+  gather_facts: false
+  # connection: local
+  # serial: 1
+  # serial: "{{ ns_install_batch_size | default('100%') }}" # Must override from CLI - specifying in group_vars/all.yml does not work 
+  # vars_files:
+  #   - "{{ dqenet_device_config_file }}"
+  vars:
+    config_fragment_template_base_dir: "{{ lookup('env', 'CONFIG_FRAGMENT_TEMPLATE_BASE_DIR') | default(('%s/templates' | format(playbook_dir)), true) }}"
+    # dev_cli_user_name: "{{ ansible_user | default(dqenet_device_junos_cli_username) }}"
+    ssh_key_list: "{{ lookup('file', dqenet_device_junos_cli_user_pubkey_file).split('\n') }}"
+
+  roles:
+  - Juniper.junos
+
+
+  tasks:
+
+#   - name: Load Device Model Group Template Mapping CSV file
+#     when: false
+#     read_csv:
+#       path: "{{ 'files/%s' | foemat(model_group_template_map_file_name) }}"
+#       key: "Folder Name"
+#     register: template2folder_map_facts
+#   - name: Load Device Model Group Template Mapping CSV file
+#     when: false
+#     read_csv:
+#       path: "{{ 'files/%s' | foemat(model_group_template_map_file_name) }}"
+#       # key: "Folder Name"
+#     register: template2folder_list_facts
+
+  - name: Load Device Model Group Template Mapping CSV file
+    xls_to_facts:
+      src: "{{ model_device_group_file_path }}"
+    vars:
+        config_fragment_template_repo_dir: "{{ lookup('env', 'CONFIG_FRAGMENT_TEMPLATE_REPO_DIR') | default(playbook_dir, true) }}"
+        model_device_group_data_dir: "{{ '%s/files' | format(config_fragment_template_repo_dir) }}"
+        model_device_group_file_path: "{{ '%s/%s' | format(model_device_group_data_dir, model_group_template_map_file_name) }}"
+    register: template2folder_map_facts
+    no_log: false
+
+  - name: Extract device Model Group Template Mapping Spreadsheet data as list
+    set_fact: 
+      device_model_group_template_folder_map_list: "{{ template2folder_map_facts.ansible_facts['spreadsheet_Model Groups'] | rejectattr('Folder Name', 'equalto', None) |  list }}"
+
+  - name: Forced Fail if no template dir found in the spreadsheet
+    when: ((device_model_group_template_folder_map_list | length) == 0)
+    fail:
+      msg: "No template dir name found in the spreadsheet - spreadsheet is empty"
+
+  - name: Create a map between folder name and associated Model Group name list from Spreadsheet data
+    set_fact: 
+      template_folder_model_group_name_map_list: "{{ (template_folder_model_group_name_map_list | default({}, true)) | combine(template_folder_model_group_name_map)  }}"
+    vars:
+      folder_data: "{{ item }}"
+      folder_name : "{{ folder_data['Folder Name'] }}"
+      folder_group_name_data_list: "{{ lookup('dict', item) }}"
+      model_group_name_list: "{{  folder_group_name_data_list | selectattr('value', 'equalto', 'x') | map(attribute='key') | list }}"
+      template_folder_model_group_name_map: "{{ {folder_name : model_group_name_list} }}"
+    with_items: "{{ device_model_group_template_folder_map_list }}"
+    no_log: true
+
+  - name: Svae the Excel sheet as JSON file
+    when: false
+    copy: 
+      content: "{{ device_model_group_template_folder_map_list | to_nice_json }}"
+      dest: "/var/tmp/{{ model_group_template_map_file_name }}.json"
+
+  - name: Extract device Model Group Template folder names as list
+    set_fact: 
+      template_folder_name_list: "{{ device_model_group_template_folder_map_list | map(attribute='Folder Name') | list }}"
+
+  - name: Extract device Model Group name list from Spreadsheet data
+    set_fact: 
+      device_model_group_name_list: "{{ device_model_group_template_folder_map_first.keys() }}"
+    vars:
+      device_model_group_template_folder_map_first: "{{ device_model_group_template_folder_map_list |  first | default({}, true) }}"
+      # device_model_group_template_map_first: "{{ (template2folder_map_facts.ansible_facts['spreadsheet_Model Groups'] | rejectattr('Folder Name', 'equalto', None) |  first | default({}, true) )  }}"
+
+  - name: Forced Fail if the specified device group is not found in the device group in the spreadsheet 
+    when: not(device_group_name in device_model_group_name_list )
+    fail:
+      msg: "Device group '{{ device_group_name }}' not in given device model group name list: {{ device_model_group_name_list }}" 
+            
+
+  # Genereted device config file based config fragment temp[lates  
+  - name: Extract device Model Group Template Mapping Spreadsheet data as list
+    set_fact: 
+      device_model_group_template_folders: "{{  device_model_group_template_folder_map_list | selectattr(device_group_name, 'equalto', 'x') | map(attribute='Folder Name') | list }}"
+
+- name: generate Junos config file based config fraggment templates
+  # hosts: "cluster_fabric_{{ device_group_name | default('qfx', true) }}_devices"
+  # hosts: cluster_fabric_mx104_devices
+  hosts: all
+  gather_facts: false
+  connection: local
+  # serial: 1
+  # serial: "{{ ns_install_batch_size | default('100%') }}" # Must override from CLI - specifying in group_vars/all.yml does not work 
+  # vars_files:
+  #   - "{{ dqenet_device_config_file }}"
+  vars:
+    device_model_group_template_folders: "{{ hostvars['localhost']['device_model_group_template_folders'] }}"
+    config_fragment_template_base_dir: "{{ lookup('env', 'CONFIG_FRAGMENT_TEMPLATE_BASE_DIR') | default(('%s/templates' | format(playbook_dir)), true) }}"
+    dev_cli_user_name: "{{ ansible_user | default(dqenet_device_junos_cli_username) }}"
+    ssh_key_list: "{{ lookup('file', dqenet_device_junos_cli_user_pubkey_file).split('\n') }}"
+
+  roles:
+  - Juniper.junos
+
+
+  tasks:
+
+  - name: convert device model group name to role name
+    # when: false
+    debug: 
+      msg: "device_group_name: {{ device_group_name }} device_model_group_template_folders: {{ device_model_group_template_folders }}"
+
+  - name: Forced Fail
+    when: false
+    fail:
+
+  - include_role :
+      name : junos-config-generate
+      # name : "{{ device_model_role_name }}-junos-config"
+    vars:
+      device_group_name: "{{ device_group_name }}"
+      # device_model_role_name: "{{ device_model_role_name }}"
+      config_fragment_template_dir_list: "{{ device_model_group_template_folders }}"
+      junos_config_filename_prefix: "{{ dqenet_device_junos_config_filename_prefix }}"
+
+  - name: Forced Fail
+    when: false
+    fail:
+
+  - name: dump dqenet_device_junos_junos_config_params var
+    debug:
+      msg: "host : {{ inventory_hostname }} device_junos_config_file_local: {{ device_junos_config_file_local }} dqenet_device_junos_cli_username: {{ dqenet_device_junos_cli_username }} dqenet_device_junos_cli_password: {{ dqenet_device_junos_cli_password }}"
+
+  # Deploy device config file  and commit-check 
+  - include_role :
+      name : junos-config-deploy 
+    vars:
+      junos_config_filename_prefix: "{{ dqenet_device_junos_config_filename_prefix }}"
+      dev_cli_user_name: "{{ ansible_user | default(dqenet_device_junos_cli_username) }}"
+      dev_cli_user_password: "{{ ansible_password | default(dqenet_device_junos_cli_password) }}"
+      dev_cli_user_privkey_file: "{{ ansible_ssh_private_key_file | default(dqenet_device_junos_cli_user_privkey_file) }}"
+      dev_config_commit_check: true
+      dev_config_commit: false
+      # dev_config_commit_check: "{{ dqenet_device_junos_commit_check }}"
+      # dev_config_commit: "{{ dqenet_device_junos_commit }}"
+      
+  # - name: Forced Fail
+  #   fail:
+
+# end-name
+
+

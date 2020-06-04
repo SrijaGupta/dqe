@@ -1,0 +1,17 @@
+device_config_diff_report:
+-   bucket_idx: 9999
+    error_bucket: true
+    error_host_ip_list: 10.102.164.36,10.102.164.240
+    error_hostname_list: vmx101,vmx102
+    msg: See error report below.
+device_config_error_report:
+-   bucket_idx: 9997
+    err_data: 'Unable to make a PyEZ connection: ConnectAuthError(10.102.164.240)'
+    err_file_path: /var/jenkins_home/workspace/dqe-test/ansible/DQE_DATA/junos_config/vmx102/vmx102.err
+    host_ip_list: 10.102.164.240
+    hostname_list: vmx102
+-   bucket_idx: 9998
+    err_data: 'Unable to make a PyEZ connection: ConnectAuthError(10.102.164.36)'
+    err_file_path: /var/jenkins_home/workspace/dqe-test/ansible/DQE_DATA/junos_config/vmx101/vmx101.err
+    host_ip_list: 10.102.164.36
+    hostname_list: vmx101
